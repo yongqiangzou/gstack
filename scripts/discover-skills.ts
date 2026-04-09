@@ -18,8 +18,13 @@ export function discoverTemplates(root: string): Array<{ tmpl: string; output: s
   const dirs = ['', ...subdirs(root)];
   const results: Array<{ tmpl: string; output: string }> = [];
   for (const dir of dirs) {
-    const rel = dir ? `${dir}/SKILL.md.tmpl` : 'SKILL.md.tmpl';
-    if (fs.existsSync(path.join(root, rel))) {
+    const base = dir ? `${dir}/` : '';
+    // Discover all *.md.tmpl files (SKILL.md.tmpl, SKILL.cn.md.tmpl, etc.)
+    const dirPath = dir ? path.join(root, dir) : root;
+    if (!fs.existsSync(dirPath)) continue;
+    const files = fs.readdirSync(dirPath).filter(f => f.endsWith('.md.tmpl'));
+    for (const file of files) {
+      const rel = `${base}${file}`;
       results.push({ tmpl: rel, output: rel.replace(/\.tmpl$/, '') });
     }
   }
