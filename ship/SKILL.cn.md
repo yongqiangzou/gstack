@@ -1,0 +1,391 @@
+---
+name: ship
+version: 1.0.0
+description: |
+  发布工作流：检测并合并基础分支、运行测试、审查差异、升级VERSION、更新CHANGELOG、提交、推送、创建PR。
+allowed-tools:
+  - Bash
+  - Read
+  - Write
+  - Edit
+  - Grep
+  - Glob
+  - AskUserQuestion
+---
+<!-- AUTO-GENERATED from SKILL.cn.md.tmpl — do not edit directly -->
+<!-- Regenerate: bun run gen:skill-docs -->
+
+## Preamble (run first)
+
+```bash
+_UPD=$(~/.claude/skills/gstack/bin/gstack-update-check 2>/dev/null || .claude/skills/gstack/bin/gstack-update-check 2>/dev/null || true)
+[ -n "$_UPD" ] && echo "$_UPD" || true
+mkdir -p ~/.gstack/sessions
+touch ~/.gstack/sessions/"$PPID"
+_SESSIONS=$(find ~/.gstack/sessions -mmin -120 -type f 2>/dev/null | wc -l | tr -d ' ')
+find ~/.gstack/sessions -mmin +120 -type f -delete 2>/dev/null || true
+_CONTRIB=$(~/.claude/skills/gstack/bin/gstack-config get gstack_contributor 2>/dev/null || true)
+_BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
+echo "BRANCH: $_BRANCH"
+```
+
+If output shows `UPGRADE_AVAILABLE <old> <new>`: read `~/.claude/skills/gstack/gstack-upgrade/SKILL.md` and follow the "Inline upgrade flow" (auto-upgrade if configured, otherwise AskUserQuestion with 4 options, write snooze state if declined). If `JUST_UPGRADED <from> <to>`: tell user "Running gstack v{to} (just updated!)" and continue.
+
+## AskUserQuestion Format
+
+**ALWAYS follow this structure for every AskUserQuestion call:**
+1. **Re-ground:** State the project, the current branch (use the `_BRANCH` value printed by the preamble — NOT any branch from conversation history or gitStatus), and the current plan/task. (1-2 sentences)
+2. **Simplify:** Explain the problem in plain English a smart 16-year-old could follow. No raw function names, no internal jargon, no implementation details. Use concrete examples and analogies. Say what it DOES, not what it's called.
+3. **Recommend:** `RECOMMENDATION: Choose [X] because [one-line reason]`
+4. **Options:** Lettered options: `A) ... B) ... C) ...`
+
+Assume the user hasn't looked at this window in 20 minutes and doesn't have the code open. If you'd need to read the source to understand your own explanation, it's too complex.
+
+Per-skill instructions may add additional formatting rules on top of this baseline.
+
+## Contributor Mode
+
+If `_CONTRIB` is `true`: you are in **contributor mode**. You're a gstack user who also helps make it better.
+
+**At the end of each major workflow step** (not after every single command), reflect on the gstack tooling you used. Rate your experience 0 to 10. If it wasn't a 10, think about why. If there is an obvious, actionable bug OR an insightful, interesting thing that could have been done better by gstack code or skill markdown — file a field report. Maybe our contributor will help make us better!
+
+**Calibration — this is the bar:** For example, `$B js "await fetch(...)"` used to fail with `SyntaxError: await is only valid in async functions` because gstack didn't wrap expressions in async context. Small, but the input was reasonable and gstack should have handled it — that's the kind of thing worth filing. Things less consequential than this, ignore.
+
+**NOT worth filing:** user's app bugs, network errors to user's URL, auth failures on user's site, user's own JS logic bugs.
+
+**To file:** write `~/.gstack/contributor-logs/{slug}.md` with **all sections below** (do not truncate — include every section through the Date/Version footer):
+
+```
+# {Title}
+
+Hey gstack team — ran into this while using /{skill-name}:
+
+**What I was trying to do:** {what the user/agent was attempting}
+**What happened instead:** {what actually happened}
+**My rating:** {0-10} — {one sentence on why it wasn't a 10}
+
+## Steps to reproduce
+1. {step}
+
+## Raw output
+```
+{paste the actual error or unexpected output here}
+```
+
+## What would make this a 10
+{one sentence: what gstack should have done differently}
+
+**Date:** {YYYY-MM-DD} | **Version:** {gstack version} | **Skill:** /{skill}
+```
+
+Slug: lowercase, hyphens, max 60 chars (e.g. `browse-js-no-await`). Skip if file already exists. Max 3 reports per session. File inline and continue — don't stop the workflow. Tell user: "Filed gstack field report: {title}"
+
+## Step 0: Detect base branch
+
+Determine which branch this PR targets. Use the result as "the base branch" in all subsequent steps.
+
+1. Check if a PR already exists for this branch:
+   `gh pr view --json baseRefName -q .baseRefName`
+   If this succeeds, use the printed branch name as the base branch.
+
+2. If no PR exists (command fails), detect the repo's default branch:
+   `gh repo view --json defaultBranchRef -q .defaultBranchRef.name`
+
+3. If both commands fail, fall back to `main`.
+
+Print the detected base branch name. In every subsequent `git diff`, `git log`,
+`git fetch`, `git merge`, and `gh pr create` command, substitute the detected
+branch name wherever the instructions say "the base branch."
+
+---
+
+# Ship：全自动发布工作流
+
+你正在运行 `/ship` 工作流。这是一个**非交互式、全自动**的工作流。在任何步骤都不要请求确认。用户输入了 `/ship`，意味着直接执行。一路运行到底，最后输出PR URL。
+
+**只在以下情况停止：**
+- 在基础分支上（中止）
+- 无法自动解决的合并冲突（停止，显示冲突）
+- 测试失败（停止，显示失败信息）
+- 预上线审查发现CRITICAL问题且用户选择修复（不是确认或跳过）
+- 需要MINOR或MAJOR版本升级（询问 — 见步骤4）
+- Greptile审查评论需要用户决策（复杂修复、误报）
+- TODOS.md不存在且用户想创建（询问 — 见步骤5.5）
+- TODOS.md结构混乱且用户想重新整理（询问 — 见步骤5.5）
+
+**永远不要停止：**
+- 未提交的更改（始终包含）
+- 版本升级选择（自动选择MICRO或PATCH — 见步骤4）
+- CHANGELOG内容（从差异自动生成）
+- 提交信息确认（自动提交）
+- 多文件变更集（自动拆分为可二分查找的提交）
+- TODOS.md已完成项检测（自动标记）
+
+---
+
+## 步骤1：预检
+
+1. 检查当前分支。如果在基础分支或仓库默认分支上，**中止**："你在基础分支上。请从功能分支发布。"
+
+2. 运行 `git status`（不要使用 `-uall`）。未提交的更改始终包含 — 无需询问。
+
+3. 运行 `git diff <base>...HEAD --stat` 和 `git log <base>..HEAD --oneline` 了解要发布的内容。
+
+---
+
+## 步骤2：合并基础分支（在测试之前）
+
+将基础分支合并到功能分支，确保测试在合并后的状态下运行：
+
+```bash
+git fetch origin <base> && git merge origin/<base> --no-edit
+```
+
+**如果有合并冲突：** 尝试自动解决简单冲突（VERSION、schema.rb、CHANGELOG顺序）。如果冲突复杂或有歧义，**停止**并显示冲突。
+
+**如果已是最新：** 静默继续。
+
+---
+
+## 步骤3：运行测试（在合并后的代码上）
+
+**不要运行 `RAILS_ENV=test bin/rails db:migrate`** — `bin/test-lane` 内部已调用
+`db:test:prepare`，会将schema加载到正确的lane数据库中。
+不带INSTANCE运行裸测试迁移会命中孤立DB并损坏structure.sql。
+
+并行运行两个测试套件：
+
+```bash
+bin/test-lane 2>&1 | tee /tmp/ship_tests.txt &
+npm run test 2>&1 | tee /tmp/ship_vitest.txt &
+wait
+```
+
+两者都完成后，读取输出文件并检查通过/失败。
+
+**如果任何测试失败：** 显示失败信息并**停止**。不要继续。
+
+**如果全部通过：** 静默继续 — 只简要记录数量。
+
+---
+
+## 步骤3.25：评估套件（条件性）
+
+只有当差异涉及prompt相关文件时才强制运行评估。如果差异中没有prompt文件，完全跳过此步骤。
+
+**1. 检查差异是否涉及prompt相关文件：**
+
+```bash
+git diff origin/<base> --name-only
+```
+
+与以下模式匹配（来自CLAUDE.md）：
+- `app/services/*_prompt_builder.rb`
+- `app/services/*_generation_service.rb`、`*_writer_service.rb`、`*_designer_service.rb`
+- `app/services/*_evaluator.rb`、`*_scorer.rb`、`*_classifier_service.rb`、`*_analyzer.rb`
+- `app/services/concerns/*voice*.rb`、`*writing*.rb`、`*prompt*.rb`、`*token*.rb`
+- `app/services/chat_tools/*.rb`、`app/services/x_thread_tools/*.rb`
+- `config/system_prompts/*.txt`
+- `test/evals/**/*`（评估基础设施变更影响所有套件）
+
+**如果没有匹配：** 输出"没有prompt相关文件变更 — 跳过评估。"并继续到步骤3.5。
+
+**2. 识别受影响的评估套件：**
+
+每个评估运行器（`test/evals/*_eval_runner.rb`）声明了 `PROMPT_SOURCE_FILES`，列出影响它的源文件。通过grep找出哪些套件匹配变更的文件：
+
+```bash
+grep -l "changed_file_basename" test/evals/*_eval_runner.rb
+```
+
+**3. 以 `EVAL_JUDGE_TIER=full` 运行受影响的套件：**
+
+`/ship` 是预合并门控，始终使用full tier（Sonnet结构 + Opus persona评判）。
+
+```bash
+EVAL_JUDGE_TIER=full EVAL_VERBOSE=1 bin/test-lane --eval test/evals/<suite>_eval_test.rb 2>&1 | tee /tmp/ship_evals.txt
+```
+
+**4. 检查结果：**
+
+- **如果任何评估失败：** 显示失败信息、成本面板并**停止**。
+- **如果全部通过：** 记录通过数量和成本。继续到步骤3.5。
+
+---
+
+## 步骤3.5：预上线审查
+
+审查差异中测试无法捕获的结构性问题。
+
+1. 读取 `.claude/skills/review/checklist.md`。如果文件无法读取，**停止**并报告错误。
+
+2. 运行 `git diff origin/<base>` 获取完整差异。
+
+3. 两轮应用审查清单：
+   - **第一轮（CRITICAL）：** SQL与数据安全、LLM输出信任边界
+   - **第二轮（INFORMATIONAL）：** 所有其他类别
+
+4. **始终输出所有发现** — 包括critical和informational。用户必须看到每个问题。
+
+5. 输出摘要标题：`预上线审查：N个问题（X个critical，Y个informational）`
+
+6. **如果发现CRITICAL问题：** 对每个critical问题单独使用AskUserQuestion：
+   - 问题（`file:line` + 描述）
+   - `建议：选择A，因为[一行原因]`
+   - 选项：A) 立即修复，B) 确认并继续发布，C) 这是误报 — 跳过
+   解决所有critical问题后：如果用户选择了A（修复），应用推荐的修复，然后按名称提交修复的文件（`git add <fixed-files> && git commit -m "fix: apply pre-landing review fixes"`），然后**停止**并告知用户重新运行 `/ship` 以在修复后重新测试。如果用户对所有问题都选择了B（确认）或C（误报），继续步骤4。
+
+7. **如果只有非critical问题：** 输出它们并继续。它们将包含在步骤8的PR正文中。
+
+8. **如果没有问题：** 输出 `预上线审查：未发现问题。` 并继续。
+
+---
+
+## 步骤3.75：处理Greptile审查评论（如果PR存在）
+
+读取 `.claude/skills/review/greptile-triage.md` 并按照获取、过滤、分类和**升级检测**步骤操作。
+
+**如果没有PR、`gh`失败、API返回错误或没有Greptile评论：** 静默跳过此步骤。继续到步骤4。
+
+---
+
+## 步骤4：版本升级（自动决定）
+
+1. 读取当前 `VERSION` 文件（4位格式：`MAJOR.MINOR.PATCH.MICRO`）
+
+2. **根据差异自动决定升级级别：**
+   - 统计变更行数（`git diff origin/<base>...HEAD --stat | tail -1`）
+   - **MICRO**（第4位）：变更少于50行，细微调整、拼写错误、配置
+   - **PATCH**（第3位）：变更50行以上，Bug修复、小中型功能
+   - **MINOR**（第2位）：**询问用户** — 仅用于主要功能或重大架构变更
+   - **MAJOR**（第1位）：**询问用户** — 仅用于里程碑或破坏性变更
+
+3. 计算新版本：
+   - 升级某位数字会将其右侧所有数字重置为0
+   - 示例：`0.19.1.0` + PATCH → `0.19.2.0`
+
+4. 将新版本写入 `VERSION` 文件。
+
+---
+
+## 步骤5：CHANGELOG（自动生成）
+
+1. 读取 `CHANGELOG.md` 头部了解格式。
+
+2. 从**分支上的所有提交**自动生成条目（不只是最近的）：
+   - 使用 `git log <base>..HEAD --oneline` 查看每个要发布的提交
+   - 使用 `git diff <base>...HEAD` 查看与基础分支的完整差异
+   - CHANGELOG条目必须涵盖进入PR的所有变更
+   - 将变更分类到适用的部分：
+     - `### Added` — 新功能
+     - `### Changed` — 对现有功能的变更
+     - `### Fixed` — Bug修复
+     - `### Removed` — 已移除的功能
+   - 写简洁、描述性的要点
+   - 插入到文件头部（第5行之后），日期为今天
+   - 格式：`## [X.Y.Z.W] - YYYY-MM-DD`
+
+**不要询问用户描述变更。** 从差异和提交历史推断。
+
+---
+
+## 步骤5.5：TODOS.md（自动更新）
+
+将项目的TODOS.md与正在发布的变更进行交叉引用。自动标记已完成的项目；只有在文件缺失或结构混乱时才提示。
+
+**1. 检查TODOS.md是否存在**于仓库根目录。
+
+**如果TODOS.md不存在：** 使用AskUserQuestion询问是否创建。
+
+**2. 检测已完成的TODO：**
+
+使用前面步骤中已收集的差异和提交历史。对每个TODO项，检查此PR中的变更是否完成了它。**保守处理：** 只有在差异中有明确证据时才标记为已完成。
+
+**3. 将已完成的项目**移到底部的 `## Completed` 部分。追加：`**Completed:** vX.Y.Z (YYYY-MM-DD)`
+
+---
+
+## 步骤6：提交（可二分查找的块）
+
+**目标：** 创建小型、逻辑性的提交，便于 `git bisect` 使用并帮助理解变更内容。
+
+1. 分析差异并将变更分组为逻辑提交。每个提交应代表**一个连贯的变更** — 不是一个文件，而是一个逻辑单元。
+
+2. **提交顺序**（早期提交在前）：
+   - **基础设施：** 迁移、配置变更、路由添加
+   - **模型和服务：** 新模型、服务、concerns（含测试）
+   - **控制器和视图：** 控制器、视图、JS/React组件（含测试）
+   - **VERSION + CHANGELOG + TODOS.md：** 始终在最后一个提交中
+
+3. 每个提交必须独立有效 — 没有损坏的导入，没有对不存在代码的引用。
+
+4. 只有**最后一个提交**（VERSION + CHANGELOG）包含版本标签和共同作者标记：
+
+```bash
+git commit -m "$(cat <<'EOF'
+chore: bump version and changelog (vX.Y.Z.W)
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## 步骤7：推送
+
+推送到远程并设置上游跟踪：
+
+```bash
+git push -u origin <branch-name>
+```
+
+---
+
+## 步骤8：创建PR
+
+使用 `gh` 创建拉取请求：
+
+```bash
+gh pr create --base <base> --title "<type>: <summary>" --body "$(cat <<'EOF'
+## 摘要
+<来自CHANGELOG的要点>
+
+## 预上线审查
+<来自步骤3.5的发现，或"未发现问题。">
+
+## 评估结果
+<如果运行了评估：套件名称、通过/失败数量、成本面板摘要。如果跳过："没有prompt相关文件变更 — 跳过评估。">
+
+## Greptile审查
+<如果发现Greptile评论：带[FIXED]/[FALSE POSITIVE]/[ALREADY FIXED]标签的要点列表>
+<如果没有Greptile评论："没有Greptile评论。">
+
+## TODOS
+<如果标记了已完成项目：带版本的已完成项目列表>
+<如果没有完成项目："此PR中没有完成TODO项目。">
+
+## 测试计划
+- [x] 所有Rails测试通过（N次运行，0次失败）
+- [x] 所有Vitest测试通过（N个测试）
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+EOF
+)"
+```
+
+**输出PR URL** — 这应该是用户看到的最终输出。
+
+---
+
+## 重要规则
+
+- **永远不要跳过测试。** 如果测试失败，停止。
+- **永远不要跳过预上线审查。** 如果checklist.md不可读，停止。
+- **永远不要强制推送。** 只使用常规 `git push`。
+- **除了MINOR/MAJOR版本升级和CRITICAL审查发现外，永远不要请求确认。**
+- **始终使用VERSION文件中的4位版本格式。**
+- **CHANGELOG中的日期格式：** `YYYY-MM-DD`
+- **为可二分查找性拆分提交** — 每个提交 = 一个逻辑变更。
+- **TODOS.md完成检测必须保守。** 只有在差异明确显示工作已完成时才标记项目为已完成。
+- **目标是：用户输入 `/ship`，接下来看到的就是审查结果 + PR URL。**

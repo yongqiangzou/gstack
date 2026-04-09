@@ -1,0 +1,73 @@
+---
+name: setup-browser-cookies
+version: 1.0.0
+description: |
+  从真实浏览器（Comet、Chrome、Arc、Brave、Edge）导入Cookie到无头浏览会话。
+  打开交互式选择器UI，让用户选择要导入的Cookie域名。
+  在QA测试需要身份验证的页面前使用。
+allowed-tools:
+  - Bash
+  - Read
+  - AskUserQuestion
+---
+
+{{PREAMBLE}}
+
+# 设置浏览器Cookie
+
+将真实Chromium浏览器中的已登录会话导入到无头浏览会话中。
+
+## 工作原理
+
+1. 找到browse二进制文件
+2. 运行 `cookie-import-browser` 检测已安装的浏览器并打开选择器UI
+3. 用户在浏览器中选择要导入的Cookie域名
+4. Cookie被解密并加载到Playwright会话中
+
+## 步骤
+
+### 1. 找到browse二进制文件
+
+{{BROWSE_SETUP}}
+
+### 2. 打开Cookie选择器
+
+```bash
+$B cookie-import-browser
+```
+
+此命令会自动检测已安装的Chromium浏览器（Comet、Chrome、Arc、Brave、Edge），
+并在默认浏览器中打开交互式选择器UI，你可以：
+- 在已安装的浏览器之间切换
+- 搜索域名
+- 点击"+"导入某个域名的Cookie
+- 点击垃圾桶图标移除已导入的Cookie
+
+告知用户：**"Cookie选择器已打开 — 请在浏览器中选择要导入的域名，完成后告诉我。"**
+
+### 3. 直接导入（备选方式）
+
+如果用户直接指定了域名（例如 `/setup-browser-cookies github.com`），跳过UI：
+
+```bash
+$B cookie-import-browser comet --domain github.com
+```
+
+如果用户指定了浏览器，将 `comet` 替换为对应的浏览器名称。
+
+### 4. 验证
+
+用户确认完成后：
+
+```bash
+$B cookies
+```
+
+向用户展示已导入Cookie的摘要（按域名统计数量）。
+
+## 注意事项
+
+- 每个浏览器首次导入时可能触发macOS钥匙串对话框 — 点击"允许"或"始终允许"
+- Cookie选择器与browse服务器共用同一端口（无需额外进程）
+- UI中只显示域名和Cookie数量 — 不暴露Cookie值
+- browse会话在命令之间持久保存Cookie，因此导入的Cookie立即生效
