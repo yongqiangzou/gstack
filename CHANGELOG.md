@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.16.2.0] - 2026-04-09
+
+### Added
+- 中文本地化：所有 skill 现在都有中文版本（`SKILL.cn.md`）。新增 `/browse`、`/ship`、`/setup-browser-cookies`、`/document-release` 的中文 skill 文档，与已有的 `/qa`、`/qa-only`、`/review`、`/retro`、`/plan-ceo-review`、`/plan-eng-review` 中文版本一起，覆盖全部 10 个核心 skill。
+- `scripts/discover-skills.ts` 现在自动发现所有 `*.md.tmpl` 文件（包括 `.cn.md.tmpl`），无需手动维护候选列表。
+
 ## [0.16.1.0] - 2026-04-08
 
 ### Fixed

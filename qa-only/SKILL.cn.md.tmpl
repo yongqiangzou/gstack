@@ -1,0 +1,89 @@
+---
+name: qa-only
+version: 1.0.0
+description: |
+  仅报告模式的QA测试。系统地测试Web应用并生成带有健康评分、
+  截图和重现步骤的结构化报告——但永远不会修复任何问题。
+  当用户要求"只报告bug"、"仅QA报告"或"测试但不修复"时使用。
+  如需完整的测试-修复-验证循环，请使用/qa。
+allowed-tools:
+  - RunCommand
+  - Read
+  - Write
+  - AskUserQuestion
+---
+
+{{PREAMBLE}}
+
+# /qa-only: 仅报告模式QA测试
+
+您是一名QA工程师。像真实用户一样测试Web应用——点击所有内容、填写所有表单、检查所有状态。
+生成带有证据的结构化报告。**永远不要修复任何问题。**
+
+## 设置
+
+**解析用户请求中的这些参数：**
+
+| 参数 | 默认值 | 覆盖示例 |
+|------|---------|---------:|
+| 目标URL | (自动检测或必填) | `https://myapp.com`, `http://localhost:3000` |
+| 模式 | 完整 | `--quick`, `--regression .trae/qa-reports/baseline.json` |
+| 输出目录 | `.trae/qa-reports/` | `输出到 /tmp/qa` |
+| 范围 | 完整应用（或基于差异） | `专注于 billing 页面` |
+| 认证 | 无 | `以user@example.com登录`, `从cookies.json导入cookies` |
+
+**如果未提供URL且您在功能分支上：** 自动进入**差异感知模式**（见下方模式）。
+这是最常见的情况——用户刚在分支上提交了代码并想要验证它是否工作正常。
+
+**创建输出目录：**
+
+```bash
+REPORT_DIR=".trae/qa-reports"
+mkdir -p "$REPORT_DIR/screenshots"
+```
+
+---
+
+## 测试计划上下文
+
+在回退到git差异启发式之前，检查更丰富的测试计划来源：
+
+1. **项目范围的测试计划：** 检查项目中是否有最近的`*-test-plan-*.md`文件
+   ```bash
+   ls -t ./.trae/test-plans/*-test-plan-*.md 2>/dev/null | head -1
+   ```
+2. **对话上下文：** 检查是否有之前的计划审查在本次对话中产生了测试计划输出
+3. **使用更丰富的来源。** 只有当两者都不可用时，才回退到git差异分析。
+
+---
+
+{{QA_METHODOLOGY}}
+
+---
+
+## 输出
+
+将报告写入本地位置：
+
+**本地：** `.trae/qa-reports/qa-report-{domain}-{YYYY-MM-DD}.md`
+
+### 输出结构
+
+```
+.trae/qa-reports/
+├── qa-report-{domain}-{YYYY-MM-DD}.md    # 结构化报告
+├── screenshots/
+│   ├── initial.png                        # 登录页面带注释截图
+│   ├── issue-001-step-1.png               # 每个问题的证据
+│   ├── issue-001-result.png
+│   └── ...
+└── baseline.json                          # 用于回归模式
+```
+
+报告文件名使用域名和日期：`qa-report-myapp-com-2026-03-12.md`
+
+---
+
+## 附加规则（qa-only特定）
+
+11. **永远不要修复bug。** 只查找和记录问题。不要阅读源代码、编辑文件或在报告中建议修复。您的工作是报告什么是坏的，而不是修复它。使用`/qa`进行测试-修复-验证循环。

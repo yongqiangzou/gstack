@@ -1,0 +1,110 @@
+---
+name: browse
+version: 1.1.0
+description: |
+  快速无头浏览器，用于QA测试和产品体验验证。支持导航URL、与元素交互、
+  验证页面状态、对比操作前后差异、截取带标注的截图、检查响应式布局、
+  测试表单和文件上传、处理对话框以及断言元素状态。
+  每条命令约100ms。适用于测试功能、验证部署、体验用户流程或附带证据提交Bug。
+allowed-tools:
+  - Bash
+  - Read
+  - AskUserQuestion
+
+---
+
+{{PREAMBLE}}
+
+# browse：QA测试与产品体验验证
+
+持久化无头Chromium浏览器。首次调用自动启动（约3秒），之后每条命令约100ms。
+状态在调用之间持久保存（Cookie、标签页、登录会话）。
+
+{{BROWSE_SETUP}}
+
+## 核心QA模式
+
+### 1. 验证页面正确加载
+```bash
+$B goto https://yourapp.com
+$B text                          # 内容是否加载？
+$B console                       # 有JS错误吗？
+$B network                       # 有失败的请求吗？
+$B is visible ".main-content"    # 关键元素是否存在？
+```
+
+### 2. 测试用户流程
+```bash
+$B goto https://app.com/login
+$B snapshot -i                   # 查看所有可交互元素
+$B fill @e3 "user@test.com"
+$B fill @e4 "password"
+$B click @e5                     # 提交
+$B snapshot -D                   # 差异对比：提交后发生了什么变化？
+$B is visible ".dashboard"       # 成功状态是否存在？
+```
+
+### 3. 验证操作是否生效
+```bash
+$B snapshot                      # 基准快照
+$B click @e3                     # 执行操作
+$B snapshot -D                   # 统一差异显示具体变化内容
+```
+
+### 4. 为Bug报告提供视觉证据
+```bash
+$B snapshot -i -a -o /tmp/annotated.png   # 带标注的截图
+$B screenshot /tmp/bug.png                # 普通截图
+$B console                                # 错误日志
+```
+
+### 5. 查找所有可点击元素（包括非ARIA元素）
+```bash
+$B snapshot -C                   # 查找带有cursor:pointer、onclick、tabindex的div
+$B click @c1                     # 与它们交互
+```
+
+### 6. 断言元素状态
+```bash
+$B is visible ".modal"
+$B is enabled "#submit-btn"
+$B is disabled "#submit-btn"
+$B is checked "#agree-checkbox"
+$B is editable "#name-field"
+$B is focused "#search-input"
+$B js "document.body.textContent.includes('Success')"
+```
+
+### 7. 测试响应式布局
+```bash
+$B responsive /tmp/layout        # 移动端 + 平板 + 桌面截图
+$B viewport 375x812              # 或设置特定视口
+$B screenshot /tmp/mobile.png
+```
+
+### 8. 测试文件上传
+```bash
+$B upload "#file-input" /path/to/file.pdf
+$B is visible ".upload-success"
+```
+
+### 9. 测试对话框
+```bash
+$B dialog-accept "yes"           # 设置处理器
+$B click "#delete-button"        # 触发对话框
+$B dialog                        # 查看弹出内容
+$B snapshot -D                   # 验证删除是否成功
+```
+
+### 10. 对比环境差异
+```bash
+$B diff https://staging.app.com https://prod.app.com
+```
+
+## 快照标志
+
+{{SNAPSHOT_FLAGS}}
+
+## 完整命令列表
+
+{{COMMAND_REFERENCE}}
